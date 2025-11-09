@@ -1,0 +1,52 @@
+name: macOS Remote Desktop
+
+on:
+  workflow_dispatch:
+
+jobs:
+  remote-desktop:
+    runs-on: macos-13
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up ngrok
+        run: |
+          curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /usr/local/share/keyrings/ngrok.asc >/dev/null
+          echo "deb [signed-by=/usr/local/share/keyrings/ngrok.asc] https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+          sudo apt update
+          sudo apt install ngrok
+          ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
+          ngrok tcp 5900 &
+
+      - name: Create User and Enable Remote Desktop
+        run: |
+          # Create a new administrator user
+          sudo dscl . -create /Users/vncuser
+          sudo dscl . -create /Users/vncuser UserShell /bin/bash
+          sudo dscl . -create /Users/vncuser RealName "VNC User"
+          sudo dscl . -create /Users/vncuser UniqueID "1001"
+          sudo dscl . -create /Users/vncuser PrimaryGroupID 80
+          sudo dscl . -create /Users/vncuser NFSHomeDirectory /Users/vncuser
+          sudo dscl . -passwd /Users/vncuser "${{ secrets.VNC_USER_PASSWORD }}"
+          sudo dscl . -append /Groups/admin GroupMembership vncuser
+
+          # Enable and configure Apple Remote Desktop
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -activate -configure -access -on -users vncuser -privs -all -restart -agent -menu
+
+          # Allow VNC clients to control the screen with a password
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -configure -clientopts -setvnclegacy -vnclegacy yes -setvncpw -vncpw "${{ secrets.VNC_PASSWORD }}"
+
+          # Restart the service
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -restart -agent
+
+      - name: Display Connection Details
+        run: |
+          sleep 10
+          curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url'
+
+      - name: Keep Workflow Running
+        run: |
+          echo "Remote desktop session is active. The workflow will remain running for 6 hours."
+          sleep 21600  # Keep the job running for 6 hours (maximum)
