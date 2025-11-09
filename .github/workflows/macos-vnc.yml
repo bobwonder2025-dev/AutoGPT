@@ -1,4 +1,4 @@
-name: macOS VNC Remote Access
+name: macOS VNC Remote Access - Standalone VNC Server
 
 on:
   workflow_dispatch:
@@ -22,106 +22,44 @@ jobs:
           TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
         run: sudo tailscale up --authkey=$TS_AUTH_KEY --accept-routes
 
-      - name: Enable ARD/VNC via Plist Configuration (DIRECT METHOD)
+      - name: Install TigerVNC Server
         run: |
-          echo "====== ENABLING ARD VIA DIRECT PLIST MODIFICATION ======"
-          
-          # Step 1: Stop existing services
-          echo "Stopping services..."
-          sudo launchctl stop com.apple.RemoteManagement.Agent.launchd 2>/dev/null || true
-          sudo launchctl unload /System/Library/LaunchDaemons/com.apple.RemoteManagement.launchd 2>/dev/null || true
-          sleep 3
-          
-          # Step 2: Enable VNC directly via plist
-          echo "Configuring ARD via plist..."
-          ARD_PLIST="/Library/Preferences/com.apple.RemoteManagement.plist"
-          
-          # Write VNC configuration directly
-          sudo defaults write "$ARD_PLIST" ARD_AllowRemoteAppleEvents -bool true
-          sudo defaults write "$ARD_PLIST" VNCLegacyConnectionsEnabled -bool true
-          sudo defaults write "$ARD_PLIST" VNCEnabled -bool true
-          sudo defaults write "$ARD_PLIST" VNCNewPasswordSet -bool true
-          sudo defaults write "$ARD_PLIST" VNCPassword -string "VNCpass2025"
-          
-          # Step 3: Enable screen sharing in system preferences
-          echo "Enabling screen sharing..."
-          sudo defaults write /Library/Preferences/com.apple.RemoteDesktop.plist ARD_AllowRemoteAppleEvents -bool true
-          
-          # Step 4: Grant screen recording permissions via tccutil
-          echo "Granting screen recording permissions..."
-          sudo tccutil reset ScreenCapture com.apple.RemoteManagement.Agent 2>/dev/null || true
-          sudo tccutil grant ScreenCapture com.apple.RemoteManagement.Agent 2>/dev/null || true
-          
-          # Step 5: Activate ARD using kickstart
-          echo "Activating ARD..."
-          KICKSTART="/System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart"
-          sudo "$KICKSTART" -activate -configure -access -on -users _Unknown -privs -all -restart -agent 2>&1 | grep -v "Error" || true
-          
-          # Step 6: Enable VNC legacy mode via kickstart  
-          echo "Enabling VNC legacy mode..."
-          sudo "$KICKSTART" -configure -setvnclegacy -vnclegacy yes -restart -agent 2>&1 | grep -v "Error" || true
-          
-          # Step 7: Set VNC password via kickstart
-          echo "Setting VNC password..."
-          sudo "$KICKSTART" -configure -clientopts -setmenuextra -menuextra yes -setvncpw -vncpw VNCpass2025 -restart -agent 2>&1 | grep -v "Error" || true
-          
-          # Step 8: Start services
-          echo "Starting ARD services..."
-          sudo launchctl load /System/Library/LaunchDaemons/com.apple.RemoteManagement.launchd 2>/dev/null || true
-          sudo launchctl start com.apple.RemoteManagement.Agent.launchd 2>/dev/null || true
-          
-          # Step 9: Aggressive wait and verify
-          echo "Waiting for VNC to initialize (25 seconds)..."
-          for i in {1..5}; do
-            sleep 5
-            if netstat -an 2>/dev/null | grep -q ":5900.*LISTEN"; then
-              echo "VNC is LISTENING after $((i*5)) seconds"
-              break
-            fi
-            echo "Attempt $i: VNC not yet listening, waiting..."
-          done
-          
-          # Step 10: Verify configuration
-          echo "Verifying configuration..."
-          echo "ARD plist contents:"
-          defaults read "$ARD_PLIST" 2>/dev/null | grep -E "(VNC|ARD)" || echo "(plist entries)"
-          echo "Port 5900 status:"
-          netstat -an | grep 5900 || echo "Port 5900 check attempted"
-          echo "ARD processes:"
-          ps aux | grep -i "[r]emotemanagement" || echo "No processes"
-          echo ""
+          brew tap tigervnc/homebrew-tigervnc
+          brew install tigervnc-server
 
-      - name: Display VNC Connection Info
+      - name: Configure VNC Password
         run: |
-          echo ""
-          echo "================================="
-          echo "VNC CONNECTION INFORMATION"
-          echo "================================="
+          mkdir -p ~/.vnc
+          echo "VNCpass2025" | vncpasswd -f > ~/.vnc/passwd
+          chmod 600 ~/.vnc/passwd
+
+      - name: Start TigerVNC Server
+        run: |
+          vncserver :99 -geometry 1920x1080 -depth 24 &
+          sleep 5
+
+      - name: Verify VNC is Listening
+        run: |
+          echo "Checking VNC port 5999 (99+5900)..."
+          netstat -an | grep 5999 || echo "Port 5999 not found"
+          ps aux | grep vnc | grep -v grep || echo "VNC process not found"
+
+      - name: Get Tailscale IP
+        run: |
           TAILSCALE_IP=$(tailscale ip -4)
           echo "Tailscale IP: $TAILSCALE_IP"
-          echo "VNC Port: 5900"
+          echo "VNC Connection: $TAILSCALE_IP:5999"
           echo "VNC Password: VNCpass2025"
-          echo "Connection String: $TAILSCALE_IP:5900"
-          echo "VNC Mode: Legacy"
-          echo "================================="
-          echo ""
+          echo "TAILSCALE_IP=$TAILSCALE_IP" >> $GITHUB_ENV
 
-      - name: Keep VNC Running - 6 Hour Monitoring
+      - name: Keep VNC Running
         run: |
-          echo "Starting 6-hour VNC monitoring loop..."
-          KICKSTART="/System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart"
-          for minute in {1..360}; do
-            echo "[$minute/360] Checking VNC status..."
-            if netstat -an 2>/dev/null | grep -q ":5900.*LISTEN"; then
-              echo "✓ VNC LISTENING at $(date)"
+          for i in {1..360}; do
+            if netstat -an | grep 5999 > /dev/null; then
+              echo "[$i/360] VNC is listening"
             else
-              echo "✗ VNC NOT LISTENING - attempting restart at $(date)"
-              sudo launchctl stop com.apple.RemoteManagement.Agent.launchd 2>/dev/null || true
-              sleep 2
-              sudo "$KICKSTART" -configure -setvnclegacy -vnclegacy yes -restart -agent 2>/dev/null || true
-              sleep 3
-              sudo launchctl start com.apple.RemoteManagement.Agent.launchd 2>/dev/null || true
-              sleep 5
+              echo "[$i/360] VNC not listening, restarting..."
+              vncserver :99 -geometry 1920x1080 -depth 24 &
             fi
             sleep 60
           done
