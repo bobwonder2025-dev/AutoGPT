@@ -11,14 +11,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up ngrok
+      - name: Install ngrok using Homebrew
         run: |
-          curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /usr/local/share/keyrings/ngrok.asc >/dev/null
-          echo "deb [signed-by=/usr/local/share/keyrings/ngrok.asc] https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
-          sudo apt update
-          sudo apt install ngrok
+          brew install ngrok
           ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
           ngrok tcp 5900 &
+          sleep 2
 
       - name: Create User and Enable Remote Desktop
         run: |
