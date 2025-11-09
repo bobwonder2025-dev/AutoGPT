@@ -26,16 +26,10 @@ jobs:
         run: |
           KS=/System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart
           sudo $KS -activate -configure -allowAccessFor -allUsers -privs -all
-          sudo $KS -configure -clientopts -setynclegacy -vnclegacy yes
           sudo $KS -configure -clientopts -setvncpw -vncpw VNCpass2025
           sudo $KS -restart -agent
           sudo $KS -activate
-          # Enable screen sharing for all users
-          sudo defaults write /var/db/launchd.db/com.apple.launchd.user.plist -dict-add com.apple.screensharing.enabled -bool true
-          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist
-          # Start VNC server with proper display
-          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.RemoteManagement.launchd.plist
-          sleep 10
+          sleep 5
           # Verify VNC is running
           ps aux | grep -i vnc | head -5
           netstat -an | grep 5900 | head -3
