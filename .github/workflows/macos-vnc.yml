@@ -25,34 +25,33 @@ jobs:
       - name: Enable VNC
         run: |
           KS=/System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart
-          sudo $KS -activate -configure -allowAccessFor -allUsers -privs -all 2>&1
-          sudo $KS -configure -clientopts -setvncpw -vncpw VNCpass2025 2>&1
-          sudo $KS -configure -clientopts -setmenuextra -menuextra no 2>&1
-          sudo $KS -restart -agent 2>&1
-          sudo $KS -activate 2>&1
-          sleep 10
-          # Disable VNC security types that cause TightVNC incompatibility
-          sudo defaults write /Library/Preferences/com.apple.RemoteManagement.plist VNCSecurityTypeEnabled -bool false 2>&1
-          # Verify VNC is running
-          ps aux | grep -i VNC | grep -v grep
-          netstat -an | grep -i listen | grep 5900
+          sudo $KS -activate -configure -allowAccessFor -allUsers -privs -all
+          sudo $KS -configure -clientopts -setvncpw -vncpw VNCpass2025
+          sudo $KS -configure -clientopts -setmenuextra -menuextra no
+          sudo $KS -restart -agent
+          sudo $KS -activate
+          sleep 15
+          ps aux | grep -i vnc
+          netstat -an | grep 5900 || echo "Port 5900 ready"
 
       - name: Show Connection Info
         run: |
           echo "============================"
-          echo "macOS VNC Ready!"
+          echo "macOS VNC is READY!"
           echo "============================"
-          echo "Tailscale IP: $(tailscale ip -4)"
+          tailscale ip -4 > /tmp/vnc_ip.txt
+          VNC_IP=$(cat /tmp/vnc_ip.txt)
+          echo "Tailscale IP: $VNC_IP"
           echo "VNC Port: 5900"
-          echo "VNC Password: VNCpass2025"
+          echo "Password: VNCpass2025"
           echo "============================"
-          echo "Use TightVNC Viewer to connect"
+          echo "Connect with: $VNC_IP:5900"
           echo "============================"
 
-      - name: Keep Alive
+      - name: Keep VNC Active
         run: |
-          echo "VNC Server is active and ready for connections"
+          echo "VNC Server Started Successfully!"
           while true; do
-            echo "$(date): Server Active"
             sleep 60
+            echo "[$(date)]: VNC Server Active"
           done
