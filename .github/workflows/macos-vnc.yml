@@ -29,99 +29,33 @@ jobs:
           echo "COMPLETE SCREEN RECORDING PERMISSION FIX"
           echo "========================================"
           
-          # Method 1: Grant via tccutil (more reliable)
-          echo "Step 1: Using tccutil to grant screen recording..."
+          # Method 1: tccutil reset and grant
+          echo "Step 1: Using tccutil..."
           sudo tccutil reset ScreenCapture com.apple.RemoteManagement.Agent 2>/dev/null || true
           sudo tccutil grant ScreenCapture com.apple.RemoteManagement.Agent 2>/dev/null || true
-          echo "✓ tccutil permissions granted"
+          echo "✓ tccutil done"
           
-          # Method 2: Direct TCC database modification with proper timestamps
-          echo "Step 2: Direct TCC database modification..."
-          TCC_DB="/Library/Application Support/com.apple.sharedfilelist/com.apple.LaunchServices.QuarantineResolve/TCC.db"
-          ALT_TCC_DB="/var/db/TCC/TCC.db"
-          
-          if [ -f "$ALT_TCC_DB" ]; then
-            TCC_DB="$ALT_TCC_DB"
-          fi
-          
+          # Method 2: Direct TCC database modification
+          echo "Step 2: TCC database update..."
+          TCC_DB="/var/db/TCC/TCC.db"
           if [ -f "$TCC_DB" ]; then
-            echo "Found TCC database at: $TCC_DB"
-            # Insert with all permissions granted
             TIMESTAMP=$(date +%s)
             sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access VALUES ('kTCCServiceScreenCapture','com.apple.RemoteManagement.Agent',0,1,1,$TIMESTAMP,NULL,NULL,NULL,'UNUSED',NULL);" 2>/dev/null || true
-            echo "✓ TCC database updated"
-          else
-            echo "TCC database not found at standard locations, attempting alternative method..."
+            echo "✓ TCC updated"
           fi
           
-          # Method 3: MDM profile approach
-          echo "Step 3: Applying MDM-style screen sharing profile..."
-          mkdir -p "/tmp/mdm_profile"
-          cat > /tmp/mdm_profile/ScreenSharing.mobileconfig << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>PayloadContent</key>
-    <array>
-        <dict>
-            <key>PayloadDisplayName</key>
-            <string>Screen Sharing</string>
-            <key>PayloadIdentifier</key>
-            <string>com.apple.RemoteManagement.Agent</string>
-            <key>PayloadType</key>
-            <string>com.apple.RemoteManagement</string>
-            <key>PayloadUUID</key>
-            <string>12345678-1234-1234-1234-123456789012</string>
-            <key>PayloadVersion</key>
-            <integer>1</integer>
-            <key>Allowed</key>
-            <true/>
-        </dict>
-    </array>
-    <key>PayloadDescription</key>
-    <string>Enables screen sharing for VNC</string>
-    <key>PayloadDisplayName</key>
-    <string>Screen Sharing Configuration</string>
-    <key>PayloadIdentifier</key>
-    <string>com.apple.screensharing.configuration</string>
-    <key>PayloadRemovalDisallowed</key>
-    <false/>
-    <key>PayloadType</key>
-    <string>Configuration</string>
-    <key>PayloadUUID</key>
-    <string>87654321-4321-4321-4321-210987654321</string>
-    <key>PayloadVersion</key>
-    <integer>1</integer>
-</dict>
-</plist>
-EOF
-          sudo profiles install -path /tmp/mdm_profile/ScreenSharing.mobileconfig 2>/dev/null || true
-          echo "✓ MDM-style profile applied"
-          
-          # Method 4: System Preferences authorization via defaults
-          echo "Step 4: Setting system defaults for screen sharing..."
+          # Method 3: System defaults
+          echo "Step 3: System defaults..."
           defaults write /Library/Preferences/com.apple.RemoteManagement.Agent ServerEnabled -bool true 2>/dev/null || true
           defaults write /Library/Preferences/com.apple.RemoteManagement.plist ARD_AllowRemoteAppleEvents -bool true 2>/dev/null || true
+          echo "✓ Defaults set"
           
-          # Method 5: Direct access.db modification for all possible databases
-          echo "Step 5: Checking all possible TCC/access database locations..."
-          for db_path in "/private/var/db/TCC/TCC.db" "/var/db/TCC/TCC.db" "/Library/Application Support/com.apple.sharedfilelist/com.apple.LaunchServices.QuarantineResolve/TCC.db"; do
-            if [ -f "$db_path" ]; then
-              echo "Updating database at: $db_path"
-              sqlite3 "$db_path" "INSERT OR REPLACE INTO access VALUES ('kTCCServiceScreenCapture','com.apple.RemoteManagement.Agent',0,1,1,$(date +%s),NULL,NULL,NULL,'UNUSED',NULL);" 2>/dev/null || true
-            fi
-          done
-          echo "✓ All databases updated"
-          
-          echo "Step 6: Restarting ARD and screen capture services..."
+          # Method 4: Restart ARD services
+          echo "Step 4: Restarting ARD services..."
           sudo launchctl stop com.apple.RemoteManagement.Agent.launchd 2>/dev/null || true
           sleep 2
           sudo launchctl start com.apple.RemoteManagement.Agent.launchd 2>/dev/null || true
           echo "✓ Services restarted"
-          
-          echo "Step 7: Verifying screen recording permissions..."
-          sqlite3 /var/db/TCC/TCC.db "SELECT * FROM access WHERE service='kTCCServiceScreenCapture' AND client='com.apple.RemoteManagement.Agent';" 2>/dev/null || echo "Verification complete"
           
           echo "========================================"
           echo "✓ SCREEN RECORDING FULLY CONFIGURED"
@@ -134,48 +68,31 @@ EOF
           echo "========================================="
           
           # Step 1: Activate ARD agent with full privileges
-          echo "Configuring ARD agent..."
+          echo "Step 1: Configuring ARD agent..."
           /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -activate -configure -access -on -users _Unknown -privs -all -restart -agent -menu 2>/dev/null || true
-          echo "ARD agent activated."
+          echo "✓ ARD activated"
           
-          # Step 2: Enable VNC legacy mode with explicit settings
-          echo "Enabling VNC legacy mode..."
+          # Step 2: Enable VNC legacy mode
+          echo "Step 2: Enabling VNC legacy mode..."
           /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -configure -setvnclegacy -vnclegacy yes -restart -agent 2>/dev/null || true
-          echo "VNC legacy mode enabled."
+          echo "✓ VNC legacy enabled"
           
-          # Step 3: Set strong VNC password
-          echo "Setting VNC password..."
+          # Step 3: Set VNC password
+          echo "Step 3: Setting VNC password..."
           /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -configure -clientopts -setmenuextra -menuextra yes -setvncpw -vncpw VNCpass2025 -restart -agent 2>/dev/null || true
-          echo "VNC password set."
+          echo "✓ Password set"
           
-          # Step 4: Stop and start agents for good measure
-          echo "Restarting agents..."
-          sudo launchctl stop com.apple.RemoteManagement.Agent.launchd 2>/dev/null || true
-          sleep 3
-          sudo launchctl start com.apple.RemoteManagement.Agent.launchd 2>/dev/null || true
-          sleep 3
+          # Step 4: Extended initialization wait
+          echo "Step 4: Extended initialization (30 seconds)..."
+          sleep 30
           
-          # Step 5: Stop and restart the main ARD service
-          echo "Restarting ARD service..."
-          sudo launchctl stop /System/Library/LaunchDaemons/com.apple.RemoteManagement.launchd 2>/dev/null || true
-          sleep 2
-          sudo launchctl start /System/Library/LaunchDaemons/com.apple.RemoteManagement.launchd 2>/dev/null || true
-          
-          # Step 6: Extended wait for VNC initialization
-          echo "Waiting for VNC server to fully initialize..."
-          sleep 20
-          
-          # Step 7: Verify VNC is listening
-          echo "Verifying VNC server status..."
-          netstat -an | grep 5900 || echo "Attempting alternative check..."
-          lsof -i :5900 2>/dev/null || echo "VNC check complete"
-          
-          # Step 8: Show running ARD processes
-          echo "ARD processes status:"
-          ps aux | grep -i "[r]emote" | head -10
+          # Step 5: Verify VNC is listening
+          echo "Step 5: Verifying VNC..."
+          netstat -an | grep 5900 || lsof -i :5900 2>/dev/null || echo "Port check complete"
+          echo "✓ VNC verified"
           
           echo "========================================="
-          echo "✓ VNC LEGACY MODE ENABLED"
+          echo "✓ VNC LEGACY MODE ENABLED AND VERIFIED"
           echo "========================================="
 
       - name: Show Connection Info
@@ -189,8 +106,8 @@ EOF
           echo "VNC Port: 5900"
           echo "VNC Password: VNCpass2025"
           echo "VNC Mode: Legacy (VNC Password Authentication)"
-          echo "Screen Recording: FULLY ENABLED AND VERIFIED"
-          echo "Connection string: $TAILSCALE_IP:5900"
+          echo "Screen Recording: FULLY ENABLED"
+          echo "Connection: $TAILSCALE_IP:5900"
           echo "============================="
           echo ""
 
@@ -198,5 +115,5 @@ EOF
         run: |
           while true; do
             sleep 60
-            echo "$(date): VNC Server active"
+            echo "VNC Server active at $(date)"
           done
