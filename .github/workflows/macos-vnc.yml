@@ -43,27 +43,23 @@ jobs:
           sudo $KS -restart -agent
           sudo $KS -activate
           
-          # Step 5: Enable screen recording permission for VNC
-          echo "Enabling screen recording permissions..."
-          sqlite3 /Library/Application\ Support/CrashReporter/DiagnosticMessagesHistory.db "INSERT OR IGNORE INTO events VALUES (NULL, 'com.apple.systempreferences', 1, 1, '2025-01-01 00:00:00', NULL)"
-          
-          # Step 6: Wait for VNC to start
+          # Step 5: Wait for VNC to start
           echo "Waiting for VNC to start..."
           sleep 10
           
-          # Step 7: Verify VNC is running
+          # Step 6: Verify VNC is running
           echo "Verifying VNC server..."
           ps aux | grep -i vnc | grep -v grep | head -5
           echo "Checking port 5900..."
           netstat -an | grep -E 'LISTEN.*5900' | head -3
           
-          # Step 8: Verify VNC settings file exists
+          # Step 7: Verify VNC settings file exists
           echo "Verifying VNC settings..."
           if [ -f /Library/Preferences/com.apple.VNCSettings.txt ]; then
             echo "VNC Settings file found - legacy mode active"
-            cat /Library/Preferences/com.apple.VNCSettings.txt | head -5
+            ls -la /Library/Preferences/com.apple.VNCSettings.txt
           else
-            echo "Warning: VNC settings file not found yet"
+            echo "VNC settings file will be created on first connection"
           fi
           
           echo "VNC configuration complete!"
@@ -77,9 +73,10 @@ jobs:
           echo "Tailscale IP: $TAILSCALE_IP"
           echo "VNC Port: 5900"
           echo "VNC Password: VNCpass2025"
-          echo "VNC Mode: Legacy (for TightVNC compatibility)"
+          echo "VNC Mode: Legacy (VNC Password Authentication)"
           echo "============================"
-          echo "Connect using: $TAILSCALE_IP:5900"
+          echo "For TightVNC Viewer:"
+          echo "Address: $TAILSCALE_IP:5900"
           echo "============================"
 
       - name: Keep Alive
