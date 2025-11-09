@@ -1,50 +1,84 @@
-name: macOS Remote Desktop
+# .github/workflows/macos-vnc.yml
+name: macOS GUI via VNC (Virtual Desktop)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Allows you to run this manually from the Actions tab
 
 jobs:
-  remote-desktop:
+  VNC:
+    # Use macOS-13, as macOS-14 (arm64) may have homebrew issues
     runs-on: macos-13
-
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install ngrok using Homebrew
+      - name: 1. Install VNC, Window Manager, and ngrok
         run: |
-          brew install ngrok
-          ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
-          ngrok tcp 5900 &
-          sleep 2
-
-      - name: Create User and Enable Remote Desktop
+          echo "Installing packages..."
+          brew install tigervnc fluxbox wget
+          echo "Downloading ngrok..."
+          wget https://bin.equinox.io/c/bNyjiMQVY4c/ngrok-v3-stable-darwin-amd64.zip
+          unzip ngrok-v3-stable-darwin-amd64.zip
+      
+      - name: 2. Configure VNC Server
         run: |
-          # Create a new administrator user
-          sudo dscl . -create /Users/vncuser
-          sudo dscl . -create /Users/vncuser UserShell /bin/bash
-          sudo dscl . -create /Users/vncuser RealName "VNC User"
-          sudo dscl . -create /Users/vncuser UniqueID "1001"
-          sudo dscl . -create /Users/vncuser PrimaryGroupID 80
-          sudo dscl . -create /Users/vncuser NFSHomeDirectory /Users/vncuser
-          sudo dscl . -passwd /Users/vncuser "${{ secrets.VNC_USER_PASSWORD }}"
-          sudo dscl . -append /Groups/admin GroupMembership vncuser
-
-          # Enable and configure Apple Remote Desktop
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -activate -configure -access -on -users vncuser -privs -all -restart -agent -menu
-
-          # Allow VNC clients to control the screen with a password
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -configure -clientopts -setvnclegacy -vnclegacy yes -setvncpw -vncpw "${{ secrets.VNC_PASSWORD }}"
-
-          # Restart the service
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -restart -agent
-
-      - name: Display Connection Details
+          # Create the .vnc directory
+          mkdir -p ~/.vnc
+          
+          # Set the VNC password. Change 'password' to your desired VNC password.
+          # This is the password you will enter in TightVNC.
+          echo "password" | vncpasswd -f > ~/.vnc/passwd
+          chmod 600 ~/.vnc/passwd
+          
+          # Configure VNC to start the Fluxbox window manager
+          echo "#!/bin/sh" > ~/.vnc/xstartup
+          echo "exec fluxbox" >> ~/.vnc/xstartup
+          chmod +x ~/.vnc/xstartup
+      
+      - name: 3. Start VNC Server
         run: |
-          sleep 10
-          curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url'
-
-      - name: Keep Workflow Running
+          echo "Starting VNC server..."
+          # Start the server on virtual display :1 (which uses port 5901)
+          # We use -localhost no so it listens on all interfaces for ngrok
+          # -SecurityTypes VncAuth is the CRITICAL fix for TightVNC compatibility
+          vncserver :1 -geometry 1280x1024 -localhost no -SecurityTypes VncAuth
+      
+      - name: 4. Start ngrok Tunnel
+        env:
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
         run: |
-          echo "Remote desktop session is active. The workflow will remain running for 6 hours."
-          sleep 21600  # Keep the job running for 6 hours (maximum)
+          echo "Authenticating and starting ngrok..."
+          ./ngrok authtoken $NGROK_AUTH_TOKEN
+          
+          # Start ngrok tunnel for VNC port 5901 in the background
+          ./ngrok tcp 5901 &
+      
+      - name: 5. Get VNC Address and Pause
+        run: |
+          echo "Waiting for ngrok to connect..."
+          sleep 10 # Give ngrok time to establish the tunnel
+          
+          # Query the ngrok API to get the public URL
+          VNC_URL=$(curl -s http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[]
+            | select(.config.addr=="localhost:5901")
+            | .public_url')
+          
+          if [ -z "$VNC_URL" ]; then
+            echo "::error:: Failed to get ngrok URL. ngrok logs:"
+            curl -s http://127.0.0.1:4040/api/tunnels
+            exit 1
+          fi
+          
+          echo "==============================================================="
+          echo "✅ VNC Connection Ready!"
+          echo ""
+          echo "Connect your TightVNC client to:"
+          echo "  $VNC_URL"
+          echo ""
+          echo "The password is the one you set in Step 2 ('password' by default)."
+          echo "You will see a simple, gray desktop (Fluxbox), NOT the macOS UI."
+          echo ""
+          echo "==============================================================="
+          
+          # Keep the job alive for 60 minutes.
+          # You can change this duration. Max is 6 hours (360 minutes).
+          echo "Workflow is paused for 60 minutes to allow VNC connection..."
+          sleep 3600
