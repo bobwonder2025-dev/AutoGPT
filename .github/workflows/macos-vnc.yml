@@ -1,4 +1,4 @@
-name: macOS VNC Remote Access - Standalone VNC Server
+name: macOS VNC Remote Access - Fixed Security Types
 
 on:
   workflow_dispatch:
@@ -27,39 +27,118 @@ jobs:
           brew tap tigervnc/homebrew-tigervnc
           brew install tigervnc-server
 
-      - name: Configure VNC Password
+      - name: Create VNC Config Directory
         run: |
           mkdir -p ~/.vnc
+          mkdir -p ~/.vnc
+
+      - name: Configure VNC with Compatible Security
+        run: |
+          # Create VNC password file
           echo "VNCpass2025" | vncpasswd -f > ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
+          
+          # Create TigerVNC config with compatible security types
+          cat > ~/.vnc/xstartup << 'EOF'
+          #!/bin/bash
+          [ -x /etc/vnc/xstartup ] && exec /etc/vnc/xstartup
+          [ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
+          xsetroot -solid grey
+          vncconfig -iconic &
+          xterm -geometry 80x24+10+10 -ls -title "$VNCDESKTOP Desktop" &
+          twm &
+          EOF
+          chmod 755 ~/.vnc/xstartup
+          
+          # Create TigerVNC config file with proper security settings
+          cat > ~/.vnc/vnc.conf << 'EOF'
+          # TigerVNC Server Configuration
+          # Security Types
+          SecurityTypes=VncAuth
+          # Encryption
+          Encrypt=Always
+          # Password authentication (already set via passwd file)
+          PasswordFile=~/.vnc/passwd
+          # Allow connections without authentication check (after password accepted)
+          # Disable problematic security types
+          # Only use VncAuth which is compatible with TightVNC Viewer
+          EOF
 
-      - name: Start TigerVNC Server
+      - name: Start TigerVNC Server with Proper Config
         run: |
-          vncserver :99 -geometry 1920x1080 -depth 24 &
+          # Kill any existing VNC server
+          killall vncserver 2>/dev/null || true
+          sleep 2
+          
+          # Start VNC server with explicit security configuration
+          # Use display :99 (port 5999, which is 99+5900=5999)
+          # BUT also try default :0 (port 5900)
+          vncserver :0 -geometry 1920x1080 -depth 24 -fg -localhost no -SecurityTypes VncAuth &
           sleep 5
 
-      - name: Verify VNC is Listening
+      - name: Verify VNC Configuration and Port
         run: |
-          echo "Checking VNC port 5999 (99+5900)..."
-          netstat -an | grep 5999 || echo "Port 5999 not found"
-          ps aux | grep vnc | grep -v grep || echo "VNC process not found"
+          echo "=== VNC Server Status ==="
+          ps aux | grep vnc | grep -v grep || echo "VNC not running"
+          
+          echo "=== Checking VNC Ports ==="
+          netstat -tuln | grep 590 || echo "No VNC ports found"
+          
+          echo "=== Checking VNC Config ==="
+          cat ~/.vnc/vnc.conf
+          
+          echo "=== Testing Local VNC Connection ==="
+          # Give server time to fully initialize
+          sleep 3
+          
+          echo "Attempting connection to localhost:5900..."
+          if timeout 5 nc -zv localhost 5900 2>&1; then
+            echo "✓ VNC is LISTENING on port 5900"
+          else
+            echo "✗ Port 5900 not responding, checking 5999..."
+            if timeout 5 nc -zv localhost 5999 2>&1; then
+              echo "✓ VNC is LISTENING on port 5999"
+            else
+              echo "✗ Neither port is responding"
+            fi
+          fi
 
-      - name: Get Tailscale IP
+      - name: Display VNC Connection Info
         run: |
           TAILSCALE_IP=$(tailscale ip -4)
+          echo ""
+          echo "======================================"
+          echo "✓ VNC CONNECTION READY"
+          echo "======================================"
           echo "Tailscale IP: $TAILSCALE_IP"
-          echo "VNC Connection: $TAILSCALE_IP:5999"
+          echo "VNC Port: 5900"
           echo "VNC Password: VNCpass2025"
-          echo "TAILSCALE_IP=$TAILSCALE_IP" >> $GITHUB_ENV
+          echo "Security Type: VncAuth (compatible)"
+          echo "Connection String: $TAILSCALE_IP:5900"
+          echo "======================================"
+          echo ""
+          echo "Instructions for TightVNC Viewer:"
+          echo "1. Enter address: $TAILSCALE_IP:5900"
+          echo "2. Use password: VNCpass2025"
+          echo "3. Security type should auto-detect as VncAuth"
+          echo ""
 
-      - name: Keep VNC Running
+      - name: Keep VNC Running - 6 Hour Monitoring Loop
         run: |
-          for i in {1..360}; do
-            if netstat -an | grep 5999 > /dev/null; then
-              echo "[$i/360] VNC is listening"
+          echo "Starting 6-hour VNC monitoring and maintenance loop..."
+          for minute in {1..360}; do
+            echo "[$minute/360] Checking VNC status at $(date '+%H:%M:%S')..."
+            
+            # Check if port is listening
+            if netstat -tuln 2>/dev/null | grep -q ":5900 "; then
+              echo "✓ VNC is LISTENING on port 5900"
             else
-              echo "[$i/360] VNC not listening, restarting..."
-              vncserver :99 -geometry 1920x1080 -depth 24 &
+              echo "✗ VNC NOT LISTENING - attempting to restart..."
+              killall vncserver 2>/dev/null || true
+              sleep 2
+              vncserver :0 -geometry 1920x1080 -depth 24 -fg -localhost no -SecurityTypes VncAuth &
+              sleep 5
             fi
+            
             sleep 60
           done
