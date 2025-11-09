@@ -25,14 +25,23 @@ jobs:
       - name: Enable VNC
         run: |
           KS=/System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart
+          # Activate and configure remote management for all users
           sudo $KS -activate -configure -allowAccessFor -allUsers -privs -all
+          # CRITICAL: Set VNC password
           sudo $KS -configure -clientopts -setvncpw -vncpw VNCpass2025
+          # CRITICAL: Disable VNC authentication/security to work with TightVNC
+          sudo $KS -configure -clientopts -setperm -owner yes
+          sudo $KS -configure -clientopts -setmultiuser -multiuser on
+          # Restart agent to apply all settings
           sudo $KS -restart -agent
           sudo $KS -activate
-          sleep 5
+          sleep 10
           # Verify VNC is running
-          ps aux | grep -i vnc | head -5
+          echo "VNC Server Status:"
+          ps aux | grep -i vnc | grep -v grep | head -3
           netstat -an | grep 5900 | head -3
+          echo "ARD Agent processes:"
+          ps aux | grep -i ard | grep -v grep | head -3
 
       - name: Show Connection Info
         run: |
@@ -42,6 +51,9 @@ jobs:
           echo "Tailscale IP: $(tailscale ip -4)"
           echo "VNC Port: 5900"
           echo "VNC Password: VNCpass2025"
+          echo "Connection String: $(tailscale ip -4):5900"
+          echo "============================"
+          echo "Note: If TightVNC prompts for security, click OK"
           echo "============================"
 
       - name: Keep Alive
