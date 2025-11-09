@@ -1,0 +1,155 @@
+name: 💻 macOS Remote Desktop Session
+
+on:
+  workflow_dispatch:
+
+jobs:
+  remote_session:
+    runs-on: macos-13
+    timeout-minutes: 360
+
+    steps:
+      - name: 1. Install Ngrok
+        run: |
+          brew install ngrok/ngrok/ngrok
+
+      - name: 2. Configure Ngrok Authentication
+        env:
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+        run: |
+          ngrok config add-authtoken $NGROK_AUTH_TOKEN
+
+      - name: 3. Authorize SSH Key
+        env:
+          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PUBLIC_KEY" > ~/.ssh/authorized_keys
+          chmod 700 ~/.ssh
+          chmod 600 ~/.ssh/authorized_keys
+
+      - name: 4. 🛑 Install TCC Permission Profile (Critical)
+        run: |
+          echo "Creating TCC configuration profile..."
+          cat << 'EOF' > tcc_profile.mobileconfig
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>PayloadContent</key>
+            <array>
+              <dict>
+                <key>PayloadDescription</key>
+                <string>Grants Accessibility and Screen Capture permissions to ARDAgent.</string>
+                <key>PayloadDisplayName</key>
+                <string>TCC Permissions</string>
+                <key>PayloadIdentifier</key>
+                <string>com.github.actions.tcc.1</string>
+                <key>PayloadType</key>
+                <string>com.apple.TCC.configuration-profile-policy</string>
+                <key>PayloadUUID</key>
+                <string>9E3F8029-1F76-49C1-A05E-B51A2C8F02C4</string>
+                <key>PayloadVersion</key>
+                <integer>1</integer>
+                <key>Services</key>
+                <dict>
+                  <key>Accessibility</key>
+                  <array>
+                    <dict>
+                      <key>Allowed</key>
+                      <true/>
+                      <key>CodeRequirement</key>
+                      <string>identifier "com.apple.ARDAgent" and anchor apple</string>
+                      <key>Comment</key>
+                      <string>Allow ARDAgent for VNC control</string>
+                      <key>Identifier</key>
+                      <string>com.apple.ARDAgent</string>
+                      <key>IdentifierType</key>
+                      <string>bundleID</string>
+                    </dict>
+                  </array>
+                  <key>ScreenCapture</key>
+                  <array>
+                    <dict>
+                      <key>Allowed</key>
+                      <true/>
+                      <key>CodeRequirement</key>
+                      <string>identifier "com.apple.ARDAgent" and anchor apple</string>
+                      <key>Comment</key>
+                      <string>Allow ARDAgent for VNC screen sharing</string>
+                      <key>Identifier</key>
+                      <string>com.apple.ARDAgent</string>
+                      <key>IdentifierType</key>
+                      <string>bundleID</string>
+                    </dict>
+                  </array>
+                </dict>
+              </dict>
+            </array>
+            <key>PayloadDisplayName</key>
+            <string>GitHub Actions TCC Permissions</string>
+            <key>PayloadIdentifier</key>
+            <string>com.github.actions.tcc</string>
+            <key>PayloadScope</key>
+            <string>System</string>
+            <key>PayloadType</key>
+            <string>Configuration</string>
+            <key>PayloadUUID</key>
+            <string>4B1AAA67-A6AD-485A-8A6E-C5751C47020F</string>
+            <key>PayloadVersion</key>
+            <integer>1</integer>
+          </dict>
+          </plist>
+          EOF
+          
+          echo "Installing TCC profile..."
+          sudo profiles install -path=tcc_profile.mobileconfig
+          echo "✅ TCC profile installed."
+
+      - name: 5. ⚙️ Configure and Start macOS VNC Server
+        run: |
+          VNC_PASSWORD="vncpassword"
+          
+          echo "Configuring Apple Remote Desktop (ARD)..."
+          
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -allowAccessFor -allUsers -privs -all
+          
+          echo "Enabling legacy VNC password mode for TightVNC compatibility..."
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -clientopts -setvnclegacy -vnclegacy yes
+          
+          echo "Setting VNC password..."
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -clientopts -setvncpw -vncpw "$VNC_PASSWORD"
+          
+          echo "Activating and restarting ARD agent..."
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -restart -agent -console
+          
+          echo "✅ VNC Server Started"
+          echo "Password: $VNC_PASSWORD (used inside SSH tunnel)"
+
+      - name: 6. tunnelling... Start Ngrok SSH Tunnel
+        run: |
+          echo "Starting Ngrok tunnel for SSH (port 22)..."
+          ngrok tcp 22 --log=stdout > ngrok.log &
+          
+          sleep 10
+          
+          echo "=================================================="
+          echo "✅ Remote Session is LIVE - Ready for Connection"
+          echo "=================================================="
+          echo ""
+          echo "Fetching connection details..."
+          curl -s http://127.0.0.1:4040/api/tunnels
+          echo ""
+          echo "Look for 'public_url' in the JSON above"
+          echo "Example: tcp://0.tcp.ngrok.io:12345"
+          echo "=================================================="
+
+      - name: 7. ⏳ Keep Session Alive
+        run: |
+          echo "Session active. Job will timeout after 6 hours."
+          echo "To stop early, cancel the GitHub Actions workflow."
+          sleep 21600
