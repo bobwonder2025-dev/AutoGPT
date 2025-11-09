@@ -13,8 +13,7 @@ jobs:
       - name: 1. Install VNC, Window Manager, and ngrok
         run: |
           echo "Installing packages..."
-          brew install tigervnc fluxbox wget
-          echo "Downloading ngrok..."
+          brew install tiger-vnc fluxbox wget          echo "Downloading ngrok..."
           wget https://bin.equinox.io/c/bNyjiMQVY4c/ngrok-v3-stable-darwin-amd64.zip
           unzip ngrok-v3-stable-darwin-amd64.zip
       
