@@ -22,98 +22,131 @@ jobs:
           TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
         run: sudo tailscale up --authkey=$TS_AUTH_KEY --accept-routes
 
-      - name: Grant Full Screen Recording Permissions (100% Fix)
+      - name: Comprehensive VNC Diagnostic and Setup
         run: |
-          set -e
-          echo "========================================"
-          echo "COMPLETE SCREEN RECORDING PERMISSION FIX"
-          echo "========================================"
+          set -x
+          echo ""
+          echo "===== COMPREHENSIVE VNC DIAGNOSTIC AND SETUP ====="
+          echo ""
           
-          # Method 1: tccutil reset and grant
-          echo "Step 1: Using tccutil..."
+          # Step 1: Check current ARD status
+          echo "Step 1: Current ARD/VNC Status"
+          ps aux | grep -i "[r]emote" || echo "No remote processes found"
+          echo ""
+          
+          # Step 2: Check if VNC is already running
+          echo "Step 2: Check port 5900"
+          netstat -an | grep 5900 || echo "Port 5900 not listening"
+          echo ""
+          
+          # Step 3: Stop existing services
+          echo "Step 3: Stopping existing ARD services..."
+          sudo launchctl stop com.apple.RemoteManagement.Agent.launchd 2>/dev/null || true
+          sudo launchctl stop /System/Library/LaunchDaemons/com.apple.RemoteManagement.launchd 2>/dev/null || true
+          sleep 3
+          echo "Done"
+          echo ""
+          
+          # Step 4: Grant screen recording permissions - AGGRESSIVE
+          echo "Step 4: Granting screen recording permissions..."
           sudo tccutil reset ScreenCapture com.apple.RemoteManagement.Agent 2>/dev/null || true
           sudo tccutil grant ScreenCapture com.apple.RemoteManagement.Agent 2>/dev/null || true
-          echo "✓ tccutil done"
+          sleep 1
+          echo "Done"
+          echo ""
           
-          # Method 2: Direct TCC database modification
-          echo "Step 2: TCC database update..."
-          TCC_DB="/var/db/TCC/TCC.db"
-          if [ -f "$TCC_DB" ]; then
-            TIMESTAMP=$(date +%s)
-            sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access VALUES ('kTCCServiceScreenCapture','com.apple.RemoteManagement.Agent',0,1,1,$TIMESTAMP,NULL,NULL,NULL,'UNUSED',NULL);" 2>/dev/null || true
-            echo "✓ TCC updated"
-          fi
+          # Step 5: Enable ARD with EXPLICIT full access
+          echo "Step 5: Enabling ARD/VNC with explicit commands..."
+          KICKSTART="/System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart"
           
-          # Method 3: System defaults
-          echo "Step 3: System defaults..."
-          defaults write /Library/Preferences/com.apple.RemoteManagement.Agent ServerEnabled -bool true 2>/dev/null || true
-          defaults write /Library/Preferences/com.apple.RemoteManagement.plist ARD_AllowRemoteAppleEvents -bool true 2>/dev/null || true
-          echo "✓ Defaults set"
-          
-          # Method 4: Restart ARD services
-          echo "Step 4: Restarting ARD services..."
-          sudo launchctl stop com.apple.RemoteManagement.Agent.launchd 2>/dev/null || true
+          # Activate with explicit parameters
+          sudo "$KICKSTART" -activate -configure -access -on -users _Unknown -privs -all -restart -agent 2>&1 | head -20
           sleep 2
-          sudo launchctl start com.apple.RemoteManagement.Agent.launchd 2>/dev/null || true
-          echo "✓ Services restarted"
+          echo "ARD activated"
+          echo ""
           
-          echo "========================================"
-          echo "✓ SCREEN RECORDING FULLY CONFIGURED"
-          echo "========================================"
+          # Step 6: Explicitly enable VNC with legacy mode
+          echo "Step 6: Enabling VNC legacy mode..."
+          sudo "$KICKSTART" -configure -setvnclegacy -vnclegacy yes -restart -agent 2>&1 | head -20
+          sleep 2
+          echo "VNC legacy mode set"
+          echo ""
+          
+          # Step 7: Set VNC password
+          echo "Step 7: Setting VNC password..."
+          sudo "$KICKSTART" -configure -clientopts -setmenuextra -menuextra yes -setvncpw -vncpw VNCpass2025 -restart -agent 2>&1 | head -20
+          sleep 2
+          echo "Password set"
+          echo ""
+          
+          # Step 8: Start VNC service explicitly
+          echo "Step 8: Starting VNC service..."
+          sudo launchctl start com.apple.RemoteManagement.Agent.launchd 2>&1 || echo "Start command completed"
+          sleep 5
+          echo "Waiting for port..."
+          sleep 10
+          echo ""
+          
+          # Step 9: CRITICAL VERIFICATION - Check if VNC is actually listening
+          echo "Step 9: CRITICAL - Verify VNC is listening..."
+          echo "Checking port 5900..."
+          if netstat -an | grep -q ".*5900.*LISTEN"; then
+            echo "✓ SUCCESS: VNC IS LISTENING ON PORT 5900"
+          else
+            echo "✗ FAILURE: VNC IS NOT LISTENING ON PORT 5900"
+            echo "Attempting emergency restart..."
+            sudo launchctl stop com.apple.RemoteManagement.Agent.launchd 2>/dev/null || true
+            sleep 2
+            sudo launchctl start com.apple.RemoteManagement.Agent.launchd 2>/dev/null || true
+            sleep 5
+            if netstat -an | grep -q ".*5900.*LISTEN"; then
+              echo "✓ EMERGENCY RESTART SUCCESSFUL"
+            else
+              echo "✗ EMERGENCY RESTART FAILED - VNC STILL NOT LISTENING"
+            fi
+          fi
+          echo ""
+          
+          # Step 10: Show all running remote processes
+          echo "Step 10: All remote management processes..."
+          ps aux | grep -i "remote" | grep -v grep || echo "No processes"
+          echo ""
+          
+          # Step 11: Listen on all local interfaces with explicit binding (optional)
+          echo "Step 11: Full port status..."
+          netstat -an | grep 5900 || echo "Port 5900 still not visible"
+          echo ""
+          
+          echo "===== END DIAGNOSTIC ====="
+          echo ""
 
-      - name: Enable VNC with Legacy Mode and Enhanced Security
-        run: |
-          echo "========================================="
-          echo "ENABLING VNC WITH LEGACY MODE AND SECURITY"
-          echo "========================================="
-          
-          # Step 1: Activate ARD agent with full privileges
-          echo "Step 1: Configuring ARD agent..."
-          /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -activate -configure -access -on -users _Unknown -privs -all -restart -agent -menu 2>/dev/null || true
-          echo "✓ ARD activated"
-          
-          # Step 2: Enable VNC legacy mode
-          echo "Step 2: Enabling VNC legacy mode..."
-          /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -configure -setvnclegacy -vnclegacy yes -restart -agent 2>/dev/null || true
-          echo "✓ VNC legacy enabled"
-          
-          # Step 3: Set VNC password
-          echo "Step 3: Setting VNC password..."
-          /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -configure -clientopts -setmenuextra -menuextra yes -setvncpw -vncpw VNCpass2025 -restart -agent 2>/dev/null || true
-          echo "✓ Password set"
-          
-          # Step 4: Extended initialization wait
-          echo "Step 4: Extended initialization (30 seconds)..."
-          sleep 30
-          
-          # Step 5: Verify VNC is listening
-          echo "Step 5: Verifying VNC..."
-          netstat -an | grep 5900 || lsof -i :5900 2>/dev/null || echo "Port check complete"
-          echo "✓ VNC verified"
-          
-          echo "========================================="
-          echo "✓ VNC LEGACY MODE ENABLED AND VERIFIED"
-          echo "========================================="
-
-      - name: Show Connection Info
+      - name: Display Connection Info
         run: |
           echo ""
           echo "============================="
-          echo "VNC Connection Details:"
+          echo "VNC CONNECTION READY"
           echo "============================="
           TAILSCALE_IP=$(tailscale ip -4)
           echo "Tailscale IP: $TAILSCALE_IP"
           echo "VNC Port: 5900"
           echo "VNC Password: VNCpass2025"
-          echo "VNC Mode: Legacy (VNC Password Authentication)"
-          echo "Screen Recording: FULLY ENABLED"
           echo "Connection: $TAILSCALE_IP:5900"
           echo "============================="
           echo ""
 
-      - name: Keep Alive
+      - name: Keep VNC Alive - Extended Duration
         run: |
-          while true; do
+          echo "Starting 6-hour keep-alive loop..."
+          for i in {1..360}; do
+            echo "Minute $i: VNC server check..."
+            if netstat -an | grep -q ".*5900.*LISTEN"; then
+              echo "VNC is LISTENING ✓"
+            else
+              echo "VNC is NOT listening ✗ - attempting restart"
+              sudo launchctl stop com.apple.RemoteManagement.Agent.launchd 2>/dev/null || true
+              sleep 2
+              sudo launchctl start com.apple.RemoteManagement.Agent.launchd 2>/dev/null || true
+              sleep 5
+            fi
             sleep 60
-            echo "VNC Server active at $(date)"
           done
