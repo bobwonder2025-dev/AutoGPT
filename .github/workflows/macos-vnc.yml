@@ -1,0 +1,54 @@
+name: macOS VNC Remote Access
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-13
+    timeout-minutes: 360
+
+    steps:
+      - name: Install Tailscale
+        run: brew install tailscale
+
+      - name: Start Tailscale
+        run: |
+          sudo brew services start tailscale
+          sleep 5
+
+      - name: Connect to Tailscale
+        env:
+          TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
+        run: sudo tailscale up --authkey=$TS_AUTH_KEY --accept-routes
+
+      - name: Enable VNC
+        run: |
+          KS=/System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart
+          sudo $KS -activate -configure -allowAccessFor -allUsers -privs -all
+          sudo $KS -configure -clientopts -setvnclegacy -vnclegacy yes
+          sudo $KS -configure -clientopts -setvncpw -vncpw VNCpass2025
+          sudo $KS -restart -agent
+          sudo $KS -activate
+                    # Start display server and desktop environment
+                              export DISPLAY=:0
+                                        sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.WindowServer.plist || true
+                                                  open /System/Library/CoreServices/Finder.app
+                                                            open /System/Library/CoreServices/Dock.app
+
+      - name: Show Connection Info
+        run: |
+          echo "============================="
+          echo "VNC Connection Details:"
+          echo "============================="
+          echo "Tailscale IP: $(tailscale ip -4)"
+          echo "VNC Port: 5900"
+          echo "VNC Password: VNCpass2025"
+          echo "============================="
+
+      - name: Keep Alive
+        run: |
+          while true; do
+            sleep 60
+            echo "Active: $(date)"
+          done
